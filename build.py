@@ -41,17 +41,9 @@ def possible_rollup_binary_paths(config):
 
     :type config: Configuration
     """
-    npm = config.find_misc_executable('npm')
-    if npm is None:
-        raise Exception("npm not found! tried paths: {}".format(possible_rollup_binary_paths(config)))
-
-    args = [npm, 'bin']
-    ran_npm = subprocess.run(args, capture_output=True, encoding='utf-8')
-
-    if ran_npm.returncode != 0:
-        raise Exception("npm bin failed. exit code: {}. command line '{}'. stderr: {}. stdout: {}"
-                        .format(ran_npm.returncode, "' '".join(args), ran_npm.stderr, ran_npm.stdout))
-    npm_bin_dir = ran_npm.stdout.strip()
+    # `npm bin` was removed in modern npm releases. Local npm executables are
+    # always installed in node_modules/.bin, so resolve Rollup directly.
+    npm_bin_dir = os.path.join(config.base_dir, 'node_modules', '.bin')
     # if we're running on Windows, then we need to explicitly use rollup.cmd or rollup.ps1 rather than rollup - rollup will still exist, it will just be an unexecutable shell file ._.
     if os.name == 'nt':
         return [
@@ -186,6 +178,8 @@ def load_config(base_dir):
                         help="""Alternative to Transcrypt's -xpath option for \
                         finding nested modules.  Use this option if Transcrypt \
                         is unable to import nested .py files""")
+    parser.add_argument("--build-only", action='store_true',
+                        help="build JavaScript without uploading it to Screeps")
     args = parser.parse_args()
 
     config_file = os.path.join(base_dir, 'config.json')
@@ -193,7 +187,9 @@ def load_config(base_dir):
     with open(os.path.join(base_dir, config_file)) as f:
         config_json = json.load(f)
 
-    return Configuration(base_dir, config_json, clean_build=not args.dirty_build, flatten=args.expand_files)
+    config = Configuration(base_dir, config_json, clean_build=not args.dirty_build, flatten=args.expand_files)
+    config.build_only = args.build_only
+    return config
 
 
 def run_transcrypt(config):
@@ -345,7 +341,7 @@ def install_env(config):
 
         if not os.path.exists(env_dir):
             print("creating venv environment...")
-            args = ['python', '-m', 'venv', '--system-site-packages', env_dir]
+            args = [sys.executable, '-m', 'venv', '--system-site-packages', env_dir]
 
             ret = subprocess.Popen(args, cwd=config.base_dir).wait()
 
@@ -430,7 +426,8 @@ def main():
         expander_control.expand_files()
 
     build(config)
-    upload(config)
+    if not config.build_only:
+        upload(config)
 
 
 if __name__ == "__main__":
