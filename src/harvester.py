@@ -1,80 +1,63 @@
 from defs import *
 
-__pragma__('noalias', 'name')
-__pragma__('noalias', 'undefined')
-__pragma__('noalias', 'Infinity')
-__pragma__('noalias', 'keys')
-__pragma__('noalias', 'get')
-__pragma__('noalias', 'set')
-__pragma__('noalias', 'type')
-__pragma__('noalias', 'update')
+__pragma__("noalias", "name")
+__pragma__("noalias", "undefined")
+__pragma__("noalias", "Infinity")
+__pragma__("noalias", "keys")
+__pragma__("noalias", "get")
+__pragma__("noalias", "set")
+__pragma__("noalias", "type")
+__pragma__("noalias", "update")
 
 
 def run_harvester(creep):
-    """
-    Runs a creep as a generic harvester.
-    :param creep: The creep to run
-    """
+    """Harvest energy, refill Spawn/Extensions, then upgrade the Controller."""
 
-    # If we're full, stop filling up and remove the saved source
-    if creep.memory.filling and _.sum(creep.carry) >= creep.carryCapacity:
+    energy = creep.store.getUsedCapacity(RESOURCE_ENERGY)
+    free_capacity = creep.store.getFreeCapacity(RESOURCE_ENERGY)
+
+    if creep.memory.filling and free_capacity == 0:
         creep.memory.filling = False
-        del creep.memory.source
-    # If we're empty, start filling again and remove the saved target
-    elif not creep.memory.filling and creep.carry.energy <= 0:
+        creep.say("deliver")
+    elif not creep.memory.filling and energy == 0:
         creep.memory.filling = True
-        del creep.memory.target
+        creep.say("harvest")
 
     if creep.memory.filling:
-        # If we have a saved source, use it
-        if creep.memory.source:
-            source = Game.getObjectById(creep.memory.source)
-        else:
-            # Get a random new source and save it
-            source = _.sample(creep.room.find(FIND_SOURCES))
-            creep.memory.source = source.id
+        source = creep.pos.findClosestByPath(FIND_SOURCES_ACTIVE)
+        if not source:
+            return
 
-        # If we're near the source, harvest it - otherwise, move to it.
-        if creep.pos.isNearTo(source):
-            result = creep.harvest(source)
-            if result != OK:
-                print("[{}] Unknown result from creep.harvest({}): {}".format(creep.name, source, result))
-        else:
-            creep.moveTo(source)
-    else:
-        # If we have a saved target, use it
-        if creep.memory.target:
-            target = Game.getObjectById(creep.memory.target)
-        else:
-            # Get a random new target.
-            target = _(creep.room.find(FIND_STRUCTURES)) \
-                .filter(lambda s: ((s.structureType == STRUCTURE_SPAWN or s.structureType == STRUCTURE_EXTENSION)
-                                   and s.energy < s.energyCapacity) or s.structureType == STRUCTURE_CONTROLLER) \
-                .sample()
-            creep.memory.target = target.id
+        result = creep.harvest(source)
+        if result == ERR_NOT_IN_RANGE:
+            creep.moveTo(source, {"visualizePathStyle": {"stroke": "#ffaa00"}})
+        elif result != OK:
+            print("[{}] harvest failed: {}".format(creep.name, result))
+        return
 
-        # If we are targeting a spawn or extension, we need to be directly next to it - otherwise, we can be 3 away.
-        if target.energyCapacity:
-            is_close = creep.pos.isNearTo(target)
-        else:
-            is_close = creep.pos.inRangeTo(target, 3)
+    target = creep.pos.findClosestByPath(
+        FIND_MY_STRUCTURES,
+        {
+            "filter": lambda structure: (
+                structure.structureType == STRUCTURE_SPAWN
+                or structure.structureType == STRUCTURE_EXTENSION
+            )
+            and structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        },
+    )
 
-        if is_close:
-            # If we are targeting a spawn or extension, transfer energy. Otherwise, use upgradeController on it.
-            if target.energyCapacity:
-                result = creep.transfer(target, RESOURCE_ENERGY)
-                if result == OK or result == ERR_FULL:
-                    del creep.memory.target
-                else:
-                    print("[{}] Unknown result from creep.transfer({}, {}): {}".format(
-                        creep.name, target, RESOURCE_ENERGY, result))
-            else:
-                result = creep.upgradeController(target)
-                if result != OK:
-                    print("[{}] Unknown result from creep.upgradeController({}): {}".format(
-                        creep.name, target, result))
-                # Let the creeps get a little bit closer than required to the controller, to make room for other creeps.
-                if not creep.pos.inRangeTo(target, 2):
-                    creep.moveTo(target)
-        else:
-            creep.moveTo(target)
+    if target:
+        result = creep.transfer(target, RESOURCE_ENERGY)
+        if result == ERR_NOT_IN_RANGE:
+            creep.moveTo(target, {"visualizePathStyle": {"stroke": "#ffffff"}})
+        elif result != OK:
+            print("[{}] transfer failed: {}".format(creep.name, result))
+        return
+
+    controller = creep.room.controller
+    if controller:
+        result = creep.upgradeController(controller)
+        if result == ERR_NOT_IN_RANGE:
+            creep.moveTo(controller, {"visualizePathStyle": {"stroke": "#ffffff"}})
+        elif result != OK:
+            print("[{}] upgrade failed: {}".format(creep.name, result))
